@@ -1,0 +1,203 @@
+#!/usr/bin/env sh
+EXEPATH="$0"
+EXE="$(basename "$EXEPATH")"
+
+_usage () {
+  if [ "$1" "$2" "$3" ] ; then
+    >&2 echo "usage: $EXE $4"
+    exit 2
+  fi
+}
+
+_route () {
+
+  _usage "$#" -lt 1 "<command> <...args>"
+
+  cmd="$1" && shift
+
+  case "$cmd" in
+    auth)
+      _auth "$@"; exit "$?"
+      ;;
+    status)
+      _status "$@"; exit "$?"
+      ;;
+    *)
+      _unknown_command "$cmd"
+      ;;
+  esac
+
+}
+
+IP='172.19.78.1'
+URL='https://'"$IP"'/web_auth/index.html'
+#POST='curl --insecure --data'
+POST='wget --no-check-certificate --server-response --output-document - --post-data'
+USERNAME=
+PASSWORD=
+_USERNAME=
+_PASSWORD=
+
+_urlencode () {
+  echo -n "$1" | perl -pe 's/([^A-Za-z0-9])/sprintf("%%%02X", ord($1))/seg'
+}
+
+_log () {
+  lvl="$1" && shift
+  >&2 echo "[$lvl]" "$@"
+}
+
+_sleep () {
+
+  _log info "sleep $1"
+  sleep "$1"
+
+}
+
+_do () {
+
+  _log info "$@"
+  "$@"
+  rc="$?"
+
+  if [ "$rc" -eq 0 ] ; then
+    _log succ "$@"
+  else
+    _log fail "$@"
+  fi
+
+  return "$rc"
+
+}
+
+_ok () {
+
+  "$@"
+  rc="$?"
+
+  if [ "$rc" -eq 0 ] ; then
+    _log info 'OK :)'
+  else
+    _log info 'KO :('
+  fi
+
+  return "$rc"
+
+}
+
+_auth () {
+
+  _usage "$#" -ne 1 "auth {once|daemon}"
+
+  cmd="$1" && shift
+
+  case "$cmd" in
+    once)
+      _grab_credentials
+      _auth_once "$@"; exit "$?"
+      ;;
+    daemon)
+      _grab_credentials
+      _auth_daemon "$@"; exit "$?"
+      ;;
+    *)
+      _unknown_command "auth $cmd"
+      ;;
+  esac
+
+}
+
+_grab_credentials () {
+
+  # Try to find credentials via pass
+
+  USERNAME="$(pass ULB/ethernet/user)"
+  if [ -n "$USERNAME" ]; then
+    PASSWORD="$(pass ULB/ethernet/login)"
+  fi
+
+  # If not found, fallback to user input
+
+  if [ -z "$USERNAME" -o -z "$PASSWORD" ]; then
+    read -p 'username: ' USERNAME
+    read -s -p 'password: ' PASSWORD
+    echo
+  fi
+
+  # Encode credentials for inclusion in form data
+  _USERNAME="$(_urlencode "$USERNAME")"
+  _PASSWORD="$(_urlencode "$PASSWORD")"
+
+}
+
+
+_auth_once () {
+
+  _log info 'Logging in @ '"$URL"
+
+  # Make request
+  RESULT="$($POST "admin_id=$_USERNAME&admin_pw=$_PASSWORD" "$URL" 2>&1)"
+
+  # Report success or failure
+  if <<< "$RESULT" grep 'webauthsucc' 2>&1 1>/dev/null ; then
+    _log info 'OK :)'
+    return 0
+  else
+    _log info "$RESULT"
+    _log info 'KO :('
+    return 1
+  fi
+
+}
+
+_auth_daemon () {
+
+  while true; do
+    if _status_network; then
+      if ! _google_dns_accessible; then
+	_log fail 'Internet is not accessible'
+	_log info 'Authentication for ULB internet'
+	_do _auth_once
+      fi
+    fi
+    _sleep 5
+  done
+
+}
+
+_status () {
+
+  _usage "$#" -ne 1 "status {network|auth}"
+
+  case "$cmd" in
+    network)
+      _ok _status_network "$@"; exit "$?"
+      ;;
+    auth)
+      _ok _status_auth "$@"; exit "$?"
+      ;;
+    *)
+      _unknown_command "status $cmd"
+      ;;
+  esac
+
+}
+
+_status_network () {
+  ip route | grep 'via 172.19.78.254 dev enp[0-9]s0' 2>&1 1>/dev/null
+}
+
+_google_dns_accessible () {
+  fping -t 200 8.8.8.8 | grep '8.8.8.8 is alive' 2>&1 1>/dev/null
+}
+
+_status_auth () {
+  _status_network && _google_dns_accessible
+}
+
+_unknown_command () {
+  >&2 echo "Unknown command: $1"
+  exit 3
+}
+
+_route "$@"
