@@ -169,6 +169,8 @@ _status () {
 
   _usage "$#" -ne 1 "status {network|auth}"
 
+  cmd="$1" && shift
+
   case "$cmd" in
     network)
       _ok _status_network "$@"; exit "$?"
