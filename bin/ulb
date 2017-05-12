@@ -111,9 +111,9 @@ _grab_credentials () {
 
   # Try to find credentials via pass
 
-  USERNAME="$(pass ULB/ethernet/user)"
+  USERNAME="$(pass ULB/ethernet/user 2>/dev/null)"
   if [ -n "$USERNAME" ]; then
-    PASSWORD="$(pass ULB/ethernet/login)"
+    PASSWORD="$(pass ULB/ethernet/login 2>/dev/null)"
   fi
 
   # If not found, fallback to user input
